@@ -1,0 +1,203 @@
+// ==UserScript==
+// @name         1069jp AdBlock Bypass
+// @version      1.0
+// @description  Bypass adblock detection on 1069jp.com
+// @match        *://*.1069jp.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Configuration
+    const config = {
+        debug: true,  // Set to false to disable console logs
+        checkInterval: 1000,  // Check for elements every 1 second
+        maxAttempts: 30       // Maximum number of attempts to find elements
+    };
+    
+    // Helper function for logging
+    function log(message) {
+        if (config.debug) {
+            console.log(`[AdBlock Bypass] ${message}`);
+        }
+    }
+    
+    // Function to override adblock detection functions
+    function overrideAdblockDetection() {
+        log('Overriding adblock detection methods...');
+        
+        // Common detection variables and functions to override
+        window.adBlockDetected = function() { return false; };
+        window.adblock = false;
+        window.adblockDetector = function() { return false; };
+        window.blockAdBlock = {
+            check: function() { return false; },
+            emitEvent: function() { return false; }
+        };
+        
+        // Override property getters that might be used for detection
+        try {
+            Object.defineProperty(window, 'canRunAds', {
+                get: function() { return true; },
+                configurable: true
+            });
+        } catch (e) {
+            log('Failed to override canRunAds: ' + e.message);
+        }
+        
+        // Handle potential detection by class names
+        const adClassNames = ['adsbox', 'ad-box', 'ad-banner', 'adsbygoogle'];
+        adClassNames.forEach(className => {
+            const el = document.createElement('div');
+            el.className = className;
+            el.style.height = '1px';
+            el.style.width = '1px';
+            el.style.position = 'absolute';
+            el.style.bottom = '-1px';
+            el.style.left = '-1px';
+            document.body.appendChild(el);
+        });
+    }
+    
+    // Function to ensure iframes are loaded properly
+    function fixIframes() {
+        log('Checking for iframes...');
+        
+        const iframes = document.querySelectorAll('iframe[data-src]');
+        iframes.forEach(iframe => {
+            if (iframe.getAttribute('src') && iframe.getAttribute('src').startsWith('cid:')) {
+                log('Fixing iframe with incorrect source');
+                const dataSrc = iframe.getAttribute('data-src');
+                if (dataSrc) {
+                    iframe.setAttribute('src', dataSrc);
+                    iframe.removeAttribute('data-lazyloaded');
+                    iframe.setAttribute('data-ll-status', 'loaded');
+                    log('Fixed iframe: ' + dataSrc);
+                }
+            }
+        });
+    }
+    
+    // Function to disable any network analysis
+    function disableNetworkAnalysis() {
+        log('Disabling network analysis...');
+        
+        // Overriding navigator properties to mask network detection
+        try {
+            // Make the browser appear as mobile even on WiFi
+            const originalConnection = Object.getOwnPropertyDescriptor(Navigator.prototype, 'connection');
+            
+            if (originalConnection) {
+                Object.defineProperty(Navigator.prototype, 'connection', {
+                    get: function() {
+                        const conn = originalConnection.get.call(this);
+                        if (conn) {
+                            // Override properties that might be used for detection
+                            Object.defineProperties(conn, {
+                                'type': {
+                                    get: function() { return 'cellular'; }
+                                },
+                                'effectiveType': {
+                                    get: function() { return '4g'; }
+                                },
+                                'saveData': {
+                                    get: function() { return false; }
+                                }
+                            });
+                        }
+                        return conn;
+                    }
+                });
+            }
+        } catch (e) {
+            log('Failed to override connection: ' + e.message);
+        }
+    }
+    
+    // Function to check and fix player
+    function checkAndFixPlayer() {
+        log('Checking for player issues...');
+        
+        // Check for error messages and remove them
+        const errorMessages = document.querySelectorAll('div:contains("We\'re sorry")');
+        if (errorMessages.length > 0) {
+            log('Found error message, attempting to fix...');
+            
+            errorMessages.forEach(msg => {
+                if (msg.textContent.includes("We're sorry")) {
+                    msg.style.display = 'none';
+                }
+            });
+            
+            // Try to reload the iframe
+            const iframes = document.querySelectorAll('iframe[data-src]');
+            iframes.forEach(iframe => {
+                const dataSrc = iframe.getAttribute('data-src');
+                if (dataSrc) {
+                    iframe.setAttribute('src', dataSrc);
+                }
+            });
+        }
+    }
+    
+    // Main initialization function
+    function initialize() {
+        log('Initializing adblock bypass...');
+        
+        // Apply all bypasses
+        overrideAdblockDetection();
+        disableNetworkAnalysis();
+        
+        // Set up observers for dynamic content
+        let attempts = 0;
+        const checkElements = setInterval(function() {
+            attempts++;
+            fixIframes();
+            checkAndFixPlayer();
+            
+            if (attempts >= config.maxAttempts) {
+                log(`Reached maximum attempts (${config.maxAttempts}), stopping automatic checks`);
+                clearInterval(checkElements);
+            }
+        }, config.checkInterval);
+        
+        // Observe DOM changes to fix dynamically added content
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.addedNodes.length > 0) {
+                    fixIframes();
+                    checkAndFixPlayer();
+                }
+            });
+        });
+        
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true 
+        });
+        
+        log('Initialization complete');
+    }
+    
+    // Helper for text content checking
+    function addTextContentSearch() {
+        // Add a contains method to the NodeList prototype for text searching
+        NodeList.prototype.forEach = Array.prototype.forEach;
+        
+        // Add a contains method that checks if text is in the element
+        HTMLElement.prototype.textContains = function(text) {
+            return this.textContent.indexOf(text) > -1;
+        };
+    }
+    
+    // Add text search functionality
+    addTextContentSearch();
+    
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
+    }
+})();
