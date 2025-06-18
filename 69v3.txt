@@ -1,0 +1,411 @@
+// ==UserScript==
+// @name         1069jp Iframe Keeper
+// @version      4.0
+// @description  Continuously restores video iframes when they're removed
+// @match        *://*.1069jp.com/*
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Store a reference to the last good iframe
+    let lastGoodIframe = null;
+    let lastGoodIframeParent = null;
+    let iframeRestoreCount = 0;
+    let errorBlockCount = 0;
+    
+    // Configuration
+    const config = {
+        checkIntervalMs: 50,         // Check VERY frequently (every 50ms)
+        debug: true,                 // Enable logging
+        showFixButton: true,         // Show a fix button
+        targetIframeSelector: 'iframe[data-src*="1069jp.com"]',  // Target iframe
+        errorMessageText: "We're sorry"  // Text in the error message
+    };
+    
+    // Logging function
+    function log(message) {
+        if (config.debug) {
+            console.log(`[IframeKeeper] ${message}`);
+        }
+    }
+    
+    // Function to find the video iframe
+    function findVideoIframe() {
+        // First try to find iframe with data-src
+        const iframes = document.querySelectorAll(config.targetIframeSelector);
+        if (iframes.length > 0) {
+            log(`Found ${iframes.length} target iframes`);
+            return iframes[0]; // Return the first matching iframe
+        }
+        
+        // If not found, try more general approach
+        const allIframes = document.querySelectorAll('iframe');
+        for (const iframe of allIframes) {
+            const src = iframe.getAttribute('src') || '';
+            const dataSrc = iframe.getAttribute('data-src') || '';
+            
+            if (src.includes('1069jp.com') || dataSrc.includes('1069jp.com')) {
+                log('Found iframe by src');
+                return iframe;
+            }
+        }
+        
+        log('No video iframe found');
+        return null;
+    }
+    
+    // Function to find error message elements
+    function findErrorElements() {
+        const errorElements = [];
+        
+        // Look for elements containing the error message text
+        const allElements = document.querySelectorAll('div, p, span');
+        for (const el of allElements) {
+            if (el.textContent && el.textContent.includes(config.errorMessageText)) {
+                errorElements.push(el);
+            }
+        }
+        
+        return errorElements;
+    }
+    
+    // Function to clone an iframe (preserving all attributes)
+    function cloneIframe(iframe) {
+        const clone = document.createElement('iframe');
+        
+        // Copy all attributes
+        Array.from(iframe.attributes).forEach(attr => {
+            clone.setAttribute(attr.name, attr.value);
+        });
+        
+        // Force src from data-src if needed
+        const dataSrc = iframe.getAttribute('data-src');
+        if (dataSrc) {
+            clone.setAttribute('src', dataSrc);
+        }
+        
+        // Ensure these critical attributes
+        clone.setAttribute('allowfullscreen', 'true');
+        clone.setAttribute('frameborder', '0');
+        clone.setAttribute('scrolling', 'no');
+        
+        // Set dimensions
+        clone.width = iframe.width || '720';
+        clone.height = iframe.height || '450';
+        
+        // Make sure it's visible
+        clone.style.display = 'block';
+        clone.style.visibility = 'visible';
+        clone.style.opacity = '1';
+        
+        return clone;
+    }
+    
+    // Function to save a reference to the good iframe
+    function saveGoodIframe(iframe) {
+        if (!iframe) return;
+        
+        if (!lastGoodIframe) {
+            log('Saving reference to good iframe');
+            lastGoodIframe = iframe;
+            lastGoodIframeParent = iframe.parentElement;
+            
+            // Create a clone for backup
+            const clonedIframe = cloneIframe(iframe);
+            
+            // Store the clone in a global variable for emergency recovery
+            window._savedIframeHTML = clonedIframe.outerHTML;
+            log('Saved iframe HTML for recovery');
+        }
+    }
+    
+    // Function to restore the good iframe
+    function restoreIframe() {
+        if (!lastGoodIframe || !lastGoodIframeParent) {
+            log('No saved iframe to restore');
+            return false;
+        }
+        
+        try {
+            // Check if the good iframe is still in the document and visible
+            if (document.body.contains(lastGoodIframe) && 
+                lastGoodIframe.style.display !== 'none' &&
+                lastGoodIframe.style.visibility !== 'hidden') {
+                
+                log('Good iframe is still present and visible');
+                return false; // No need to restore
+            }
+            
+            log('Restoring iframe...');
+            
+            // Create a fresh clone of the good iframe
+            const newIframe = cloneIframe(lastGoodIframe);
+            
+            // Find where to insert it
+            if (document.body.contains(lastGoodIframeParent)) {
+                // If parent is still in the document, replace existing iframe or add
+                const existingIframe = lastGoodIframeParent.querySelector('iframe');
+                if (existingIframe) {
+                    lastGoodIframeParent.replaceChild(newIframe, existingIframe);
+                } else {
+                    lastGoodIframeParent.appendChild(newIframe);
+                }
+                
+                log('Restored iframe to original parent');
+                iframeRestoreCount++;
+            } else {
+                // Parent is gone, find a suitable container
+                const containers = document.querySelectorAll('.video-container, .player-container, .embed-responsive, .video-wrapper');
+                if (containers.length > 0) {
+                    const container = containers[0];
+                    const existingIframe = container.querySelector('iframe');
+                    if (existingIframe) {
+                        container.replaceChild(newIframe, existingIframe);
+                    } else {
+                        container.appendChild(newIframe);
+                    }
+                    
+                    log('Restored iframe to found container');
+                    iframeRestoreCount++;
+                } else {
+                    // Last resort - append to body in fixed position
+                    newIframe.style.position = 'fixed';
+                    newIframe.style.top = '50%';
+                    newIframe.style.left = '50%';
+                    newIframe.style.transform = 'translate(-50%, -50%)';
+                    newIframe.style.zIndex = '9999';
+                    newIframe.style.border = '5px solid red';
+                    document.body.appendChild(newIframe);
+                    
+                    log('Restored iframe as fixed element');
+                    iframeRestoreCount++;
+                }
+            }
+            
+            return true;
+        } catch (e) {
+            log(`Error restoring iframe: ${e.message}`);
+            return false;
+        }
+    }
+    
+    // Function to remove error messages
+    function removeErrorMessages() {
+        const errorElements = findErrorElements();
+        
+        if (errorElements.length === 0) {
+            return false;
+        }
+        
+        log(`Found ${errorElements.length} error messages, removing...`);
+        
+        errorElements.forEach(el => {
+            el.style.display = 'none';
+            
+            // Also check parent elements that might be containers
+            let parent = el.parentElement;
+            let depth = 0;
+            
+            while (parent && depth < 3) {
+                // If this parent contains only the error message, hide it too
+                if (parent.children.length <= 3) {
+                    parent.style.display = 'none';
+                }
+                
+                parent = parent.parentElement;
+                depth++;
+            }
+        });
+        
+        errorBlockCount += errorElements.length;
+        return true;
+    }
+    
+    // Function to restore from emergency backup
+    function emergencyRestore() {
+        if (!window._savedIframeHTML) {
+            log('No emergency backup available');
+            return false;
+        }
+        
+        try {
+            log('Attempting emergency iframe restoration');
+            
+            // Create a container
+            const container = document.createElement('div');
+            container.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:#000;padding:10px;box-shadow:0 0 30px rgba(0,0,0,0.8);';
+            container.innerHTML = window._savedIframeHTML;
+            
+            // Add a close button
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Close';
+            closeBtn.style.cssText = 'position:absolute;top:-30px;right:0;background:#f00;color:#fff;border:none;padding:5px 10px;cursor:pointer;';
+            closeBtn.onclick = function() {
+                container.remove();
+            };
+            
+            container.appendChild(closeBtn);
+            document.body.appendChild(container);
+            
+            log('Emergency restoration complete');
+            return true;
+        } catch (e) {
+            log(`Emergency restoration failed: ${e.message}`);
+            return false;
+        }
+    }
+    
+    // Function for aggressive approach - create overlay player
+    function createOverlayPlayer() {
+        if (!window._savedIframeHTML) {
+            log('No saved iframe for overlay player');
+            return false;
+        }
+        
+        try {
+            log('Creating overlay player');
+            
+            // If overlay already exists, return
+            if (document.getElementById('bypassOverlayPlayer')) {
+                return false;
+            }
+            
+            // Create overlay container
+            const overlay = document.createElement('div');
+            overlay.id = 'bypassOverlayPlayer';
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:99999;display:flex;align-items:center;justify-content:center;';
+            
+            // Add iframe
+            const container = document.createElement('div');
+            container.style.cssText = 'position:relative;width:80%;max-width:1280px;aspect-ratio:16/9;';
+            container.innerHTML = window._savedIframeHTML;
+            
+            // Fix iframe styles
+            const iframe = container.querySelector('iframe');
+            if (iframe) {
+                iframe.style.cssText = 'width:100%;height:100%;border:none;';
+                iframe.width = '100%';
+                iframe.height = '100%';
+            }
+            
+            // Add close button
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = 'Close Player';
+            closeBtn.style.cssText = 'position:absolute;top:-40px;right:0;background:#f00;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;';
+            closeBtn.onclick = function() {
+                overlay.remove();
+            };
+            
+            container.appendChild(closeBtn);
+            overlay.appendChild(container);
+            document.body.appendChild(overlay);
+            
+            log('Overlay player created');
+            return true;
+        } catch (e) {
+            log(`Failed to create overlay player: ${e.message}`);
+            return false;
+        }
+    }
+    
+    // Main monitoring function
+    function monitorAndRestore() {
+        // First, try to find and save the good iframe if we don't have one
+        if (!lastGoodIframe) {
+            const iframe = findVideoIframe();
+            if (iframe) {
+                saveGoodIframe(iframe);
+            }
+        }
+        
+        // Remove any error messages
+        removeErrorMessages();
+        
+        // Check if we need to restore the iframe
+        restoreIframe();
+    }
+    
+    // Initialize the script
+    function initialize() {
+        log('Initializing Iframe Keeper...');
+        
+        // Start the continuous monitoring
+        setInterval(monitorAndRestore, config.checkIntervalMs);
+        
+        // Add a visible fix button if enabled
+        if (config.showFixButton) {
+            const btnContainer = document.createElement('div');
+            btnContainer.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;display:flex;flex-direction:column;gap:10px;';
+            
+            // Regular fix button
+            const fixButton = document.createElement('button');
+            fixButton.textContent = 'Fix Video';
+            fixButton.style.cssText = 'background:#f00;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+            fixButton.onclick = function() {
+                removeErrorMessages();
+                restoreIframe();
+            };
+            
+            // Overlay player button
+            const overlayButton = document.createElement('button');
+            overlayButton.textContent = 'Overlay Player';
+            overlayButton.style.cssText = 'background:#00a;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+            overlayButton.onclick = createOverlayPlayer;
+            
+            // Emergency restore button
+            const emergencyButton = document.createElement('button');
+            emergencyButton.textContent = 'Emergency Restore';
+            emergencyButton.style.cssText = 'background:#000;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+            emergencyButton.onclick = emergencyRestore;
+            
+            // Add buttons to container
+            btnContainer.appendChild(fixButton);
+            btnContainer.appendChild(overlayButton);
+            btnContainer.appendChild(emergencyButton);
+            
+            // Add info display
+            const infoDisplay = document.createElement('div');
+            infoDisplay.style.cssText = 'background:rgba(0,0,0,0.7);color:#fff;padding:5px;font-size:12px;margin-top:5px;border-radius:4px;';
+            btnContainer.appendChild(infoDisplay);
+            
+            // Update info periodically
+            setInterval(() => {
+                infoDisplay.textContent = `Restored: ${iframeRestoreCount} | Blocked: ${errorBlockCount}`;
+            }, 1000);
+            
+            // Add container to body
+            document.body.appendChild(btnContainer);
+        }
+        
+        // Add keyboard shortcut for emergency overlay (Shift+V)
+        document.addEventListener('keydown', function(e) {
+            if (e.shiftKey && e.key === 'V') {
+                createOverlayPlayer();
+            }
+        });
+        
+        log('Initialization complete');
+    }
+    
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
+    }
+    
+    // Also try to run immediately to save iframe as early as possible
+    try {
+        const iframe = findVideoIframe();
+        if (iframe) {
+            saveGoodIframe(iframe);
+            log('Early iframe save successful');
+        }
+    } catch (e) {
+        log(`Early init error: ${e.message}`);
+    }
+    
+    // Return success message
+    return 'Iframe Keeper activated. Will continuously monitor and restore video.';
+})();
