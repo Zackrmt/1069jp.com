@@ -1,0 +1,522 @@
+// ==UserScript==
+// @name         1069jp Ultra Bypass
+// @version      3.0
+// @description  Aggressive adblock bypass for 1069jp.com
+// @match        *://*.1069jp.com/*
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // ======== CONFIGURATION ========
+    const CONFIG = {
+        debug: true,                    // Enable logging
+        videoShowDelay: 3000,           // Wait 3 seconds before trying to show video
+        aggressiveMode: true,           // Use more aggressive techniques
+        checkInterval: 250,             // Check very frequently (250ms)
+        spoofMobile: true,              // Spoof mobile connection
+        keepFixing: true,               // Keep fixing even after video appears
+        useNativeAPIs: false            // Use native browser APIs (may be detected)
+    };
+    
+    // ======== CORE UTILITIES ========
+    // Logging function with timestamp
+    function log(msg) {
+        if (!CONFIG.debug) return;
+        const now = new Date();
+        console.log(`[BYPASS ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}] ${msg}`);
+    }
+    
+    log('Ultra Bypass initializing...');
+    
+    // Store original methods that might get overridden by the site
+    const original = {
+        // DOM methods
+        createElement: document.createElement,
+        appendChild: Node.prototype.appendChild,
+        removeChild: Node.prototype.removeChild,
+        setAttribute: Element.prototype.setAttribute,
+        getAttribute: Element.prototype.getAttribute,
+        querySelector: document.querySelector,
+        querySelectorAll: document.querySelectorAll,
+        getElementById: document.getElementById,
+        
+        // Window/Navigator methods
+        setTimeout: window.setTimeout,
+        setInterval: window.setInterval,
+        clearTimeout: window.clearTimeout,
+        clearInterval: window.clearInterval,
+        fetch: window.fetch,
+        
+        // XMLHttpRequest methods
+        open: XMLHttpRequest.prototype.open,
+        send: XMLHttpRequest.prototype.send
+    };
+    
+    // Safely execute a function with error handling
+    function safeExec(fn, fallback) {
+        try {
+            return fn();
+        } catch (e) {
+            log(`Error: ${e.message}`);
+            return fallback;
+        }
+    }
+    
+    // ======== ANTI-DETECTION MECHANISMS ========
+    // Spoof mobile connection
+    function spoofMobileConnection() {
+        log('Spoofing mobile connection...');
+        
+        // Create fake connection object
+        const fakeConnection = {
+            type: 'cellular',
+            effectiveType: '4g',
+            downlink: 10,
+            rtt: 50,
+            saveData: false,
+            onchange: null
+        };
+        
+        // Override connection getter in Navigator
+        safeExec(() => {
+            Object.defineProperty(navigator, 'connection', {
+                get: () => fakeConnection,
+                configurable: false
+            });
+            
+            // Also add mobile hint to user agent
+            const originalUserAgent = navigator.userAgent;
+            Object.defineProperty(navigator, 'userAgent', {
+                get: () => originalUserAgent + ' Mobile',
+                configurable: false
+            });
+            
+            // Override online status
+            Object.defineProperty(navigator, 'onLine', {
+                get: () => true,
+                configurable: false
+            });
+        });
+        
+        // Block offline events
+        window.addEventListener('offline', (e) => {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return false;
+        }, true);
+    }
+    
+    // Override common adblock detection variables
+    function overrideAdblockDetection() {
+        log('Overriding adblock detection variables...');
+        
+        const adblockProperties = [
+            'adBlockDetected', 'adblock', 'adblockDetector', 'blockAdBlock', 
+            'fuckAdBlock', 'sniffAdBlock', 'hasAdBlocker', 'isAdBlocked', 
+            'isAdBlockEnabled', 'isAdBlockActive', 'adBlockEnabled'
+        ];
+        
+        adblockProperties.forEach(prop => {
+            safeExec(() => {
+                Object.defineProperty(window, prop, {
+                    get: () => false,
+                    set: () => {},
+                    configurable: false
+                });
+            });
+        });
+        
+        const adProperties = ['canRunAds', 'canShowAds', 'adsAllowed', 'adsEnabled'];
+        adProperties.forEach(prop => {
+            safeExec(() => {
+                Object.defineProperty(window, prop, {
+                    get: () => true,
+                    configurable: false
+                });
+            });
+        });
+    }
+    
+    // Create fake ad elements to fool detection
+    function createFakeAdElements() {
+        log('Creating fake ad elements...');
+        
+        const adClassNames = [
+            'adsbox', 'ad-box', 'ad-banner', 'adsbygoogle', 'ad-placement', 
+            'ad-placeholder', 'ad-slot', 'ad-wrapper', 'adunit', 'google_ad_'
+        ];
+        
+        adClassNames.forEach(className => {
+            safeExec(() => {
+                const el = original.createElement.call(document, 'div');
+                el.className = className;
+                el.id = 'ad-' + Math.random().toString(36).substr(2, 9);
+                el.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
+                el.textContent = 'advertisement';
+                document.body.appendChild(el);
+            });
+        });
+    }
+    
+    // Override timer functions to block detection code
+    function overrideTimers() {
+        log('Overriding timer functions...');
+        
+        window.setTimeout = function(callback, delay, ...args) {
+            // Skip checks for our own timers
+            if (typeof callback === 'function' || typeof callback === 'string') {
+                const callbackStr = callback.toString().toLowerCase();
+                
+                // Block suspicious timers
+                if (callbackStr.includes('adblock') || 
+                    callbackStr.includes('ad block') ||
+                    callbackStr.includes('blocker') || 
+                    callbackStr.includes('detect') ||
+                    (callbackStr.includes('remove') && callbackStr.includes('player'))) {
+                    
+                    log('Blocked suspicious setTimeout');
+                    return -1;
+                }
+            }
+            
+            return original.setTimeout.call(window, callback, delay, ...args);
+        };
+        
+        window.setInterval = function(callback, delay, ...args) {
+            if (typeof callback === 'function' || typeof callback === 'string') {
+                const callbackStr = callback.toString().toLowerCase();
+                
+                // Block suspicious intervals
+                if (callbackStr.includes('adblock') || 
+                    callbackStr.includes('ad block') ||
+                    callbackStr.includes('blocker') || 
+                    callbackStr.includes('detect') ||
+                    (callbackStr.includes('remove') && callbackStr.includes('player'))) {
+                    
+                    log('Blocked suspicious setInterval');
+                    return -1;
+                }
+            }
+            
+            return original.setInterval.call(window, callback, delay, ...args);
+        };
+        
+        // Keep original clear functions
+        window.clearTimeout = original.clearTimeout;
+        window.clearInterval = original.clearInterval;
+    }
+    
+    // Override network requests to block detection
+    function interceptNetworkRequests() {
+        log('Intercepting network requests...');
+        
+        // Override fetch API
+        window.fetch = function(resource, init) {
+            const url = resource instanceof Request ? resource.url : resource.toString();
+            
+            // Check if this is a tracking or detection request
+            if (typeof url === 'string' && (
+                url.includes('adblock') || 
+                url.includes('ad-block') ||
+                url.includes('analytics') || 
+                url.includes('tracking') ||
+                url.includes('detect') ||
+                url.includes('check') ||
+                url.includes('api'))) {
+                
+                log('Intercepted fetch request: ' + url);
+                
+                // Modify request to add mobile hints if it's going through
+                if (init && !url.includes('adblock')) {
+                    init.headers = init.headers || {};
+                    init.headers['User-Agent'] = navigator.userAgent + ' Mobile';
+                    init.headers['X-Requested-With'] = 'com.android.browser';
+                    
+                    // Return the modified request
+                    return original.fetch.call(window, resource, init);
+                }
+                
+                // Otherwise fake a successful response
+                return Promise.resolve(new Response(JSON.stringify({
+                    success: true,
+                    status: "ok",
+                    mobile: true,
+                    connection: "cellular",
+                    adblockDetected: false
+                }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                }));
+            }
+            
+            // Allow other requests through
+            return original.fetch.call(window, resource, init);
+        };
+        
+        // Override XMLHttpRequest
+        XMLHttpRequest.prototype.open = function(method, url, ...args) {
+            if (typeof url === 'string') {
+                // Add mobile parameters to URLs
+                if (url.includes('?')) {
+                    url += '&mobile=true&connection=cellular&platform=android';
+                } else if (!url.includes('#')) {
+                    url += '?mobile=true&connection=cellular&platform=android';
+                }
+                
+                // Block obvious detection URLs
+                if (url.includes('adblock') || url.includes('detector')) {
+                    log('Blocked XHR to: ' + url);
+                    url = 'data:text/plain,{"success":true,"mobile":true}';
+                }
+            }
+            
+            return original.open.call(this, method, url, ...args);
+        };
+        
+        // Override send to add mobile headers
+        const originalSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function(...args) {
+            this.setRequestHeader('User-Agent', navigator.userAgent + ' Mobile');
+            this.setRequestHeader('X-Requested-With', 'com.android.browser');
+            return originalSend.apply(this, args);
+        };
+    }
+    
+    // ======== VIDEO FIXING MECHANISMS ========
+    // Extract data-src from iframes
+    function getVideoSources() {
+        const sources = [];
+        
+        // Get from iframes
+        const iframes = document.querySelectorAll('iframe[data-src]');
+        iframes.forEach(iframe => {
+            const dataSrc = iframe.getAttribute('data-src');
+            if (dataSrc && dataSrc.includes('1069jp.com')) {
+                sources.push({
+                    type: 'iframe',
+                    element: iframe,
+                    src: dataSrc
+                });
+            }
+        });
+        
+        // Get from videos
+        const videos = document.querySelectorAll('video[data-src]');
+        videos.forEach(video => {
+            const dataSrc = video.getAttribute('data-src');
+            if (dataSrc) {
+                sources.push({
+                    type: 'video',
+                    element: video,
+                    src: dataSrc
+                });
+            }
+        });
+        
+        log(`Found ${sources.length} video sources`);
+        return sources;
+    }
+    
+    // Replace the error message with video
+    function replaceErrorWithVideo() {
+        // Find error messages
+        const errorElements = Array.from(document.querySelectorAll('*')).filter(el => {
+            const text = el.textContent || '';
+            return text.includes("We're sorry") || 
+                   text.includes("can't find the file") || 
+                   text.includes("copyright violation");
+        });
+        
+        if (errorElements.length === 0) {
+            log('No error messages found');
+            return false;
+        }
+        
+        log(`Found ${errorElements.length} error messages, removing...`);
+        
+        // Get video sources
+        const sources = getVideoSources();
+        if (sources.length === 0) {
+            log('No video sources found to replace errors');
+            return false;
+        }
+        
+        // For each error element, try to replace with video
+        errorElements.forEach(errorEl => {
+            try {
+                // Hide the error
+                errorEl.style.display = 'none';
+                
+                // Find parent containers
+                let container = errorEl.parentElement;
+                let depth = 0;
+                
+                // Look up to 5 levels for a suitable container
+                while (container && depth < 5) {
+                    // Create a new iframe with the source
+                    const source = sources[0]; // Use the first source
+                    
+                    if (source.type === 'iframe') {
+                        const newIframe = document.createElement('iframe');
+                        newIframe.src = source.src;
+                        newIframe.width = source.element.width || 720;
+                        newIframe.height = source.element.height || 450;
+                        newIframe.setAttribute('allowfullscreen', '');
+                        newIframe.setAttribute('frameborder', '0');
+                        newIframe.setAttribute('scrolling', 'no');
+                        newIframe.style.display = 'block';
+                        
+                        // Replace or add to container
+                        const existingIframe = container.querySelector('iframe');
+                        if (existingIframe) {
+                            container.replaceChild(newIframe, existingIframe);
+                        } else {
+                            container.appendChild(newIframe);
+                        }
+                        
+                        log('Replaced error with iframe');
+                        return true;
+                    }
+                    
+                    container = container.parentElement;
+                    depth++;
+                }
+            } catch (e) {
+                log(`Error replacing video: ${e.message}`);
+            }
+        });
+        
+        return true;
+    }
+    
+    // Fix all iframe sources on the page
+    function fixAllIframes() {
+        const iframes = document.querySelectorAll('iframe');
+        let fixed = 0;
+        
+        iframes.forEach(iframe => {
+            try {
+                const currentSrc = iframe.getAttribute('src') || '';
+                const dataSrc = iframe.getAttribute('data-src');
+                
+                if (dataSrc && (
+                    currentSrc.startsWith('cid:') || 
+                    currentSrc === 'about:blank' || 
+                    currentSrc === '')) {
+                    
+                    iframe.setAttribute('src', dataSrc);
+                    iframe.style.display = 'block';
+                    iframe.style.visibility = 'visible';
+                    fixed++;
+                }
+                
+                // Make sure it's visible regardless
+                iframe.style.display = 'block';
+                iframe.style.visibility = 'visible';
+                iframe.style.opacity = '1';
+                
+                // Make parent containers visible
+                let parent = iframe.parentElement;
+                for (let i = 0; i < 3; i++) {
+                    if (!parent) break;
+                    parent.style.display = 'block';
+                    parent.style.visibility = 'visible';
+                    parent.style.opacity = '1';
+                    parent = parent.parentElement;
+                }
+            } catch (e) {
+                log(`Error fixing iframe: ${e.message}`);
+            }
+        });
+        
+        if (fixed > 0) {
+            log(`Fixed ${fixed} iframes`);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // ======== EXTREME MEASURES ========
+    // Replace the entire page content with just the video
+    function extractAndReplaceFullPage() {
+        if (!CONFIG.aggressiveMode) return false;
+        
+        log('Attempting extreme extraction...');
+        
+        // Get video sources
+        const sources = getVideoSources();
+        if (sources.length === 0) {
+            log('No video sources found for extraction');
+            return false;
+        }
+        
+        try {
+            // Create a backup of the body content
+            if (!window._originalBodyHTML) {
+                window._originalBodyHTML = document.body.innerHTML;
+            }
+            
+            // Create a new body with just the video
+            const source = sources[0];
+            let newContent = '';
+            
+            if (source.type === 'iframe') {
+                newContent = `
+                    <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;z-index:9999;">
+                        <iframe src="${source.src}" 
+                                width="80%" 
+                                height="80%" 
+                                allowfullscreen="true" 
+                                frameborder="0" 
+                                scrolling="no"
+                                style="max-width:1280px;max-height:720px;box-shadow:0 0 30px rgba(0,0,0,0.5);">
+                        </iframe>
+                        <div style="position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.5);color:#fff;padding:5px 10px;border-radius:4px;cursor:pointer;"
+                             onclick="document.body.innerHTML = window._originalBodyHTML;">
+                            Restore Page
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Replace the body content
+            document.body.innerHTML = newContent;
+            log('Replaced page with extracted video');
+            return true;
+            
+        } catch (e) {
+            log(`Error in extraction: ${e.message}`);
+            return false;
+        }
+    }
+    
+    // Attempt direct requests for embed URLs
+    function directEmbedRequest() {
+        if (!CONFIG.aggressiveMode) return false;
+        
+        log('Attempting direct embed requests...');
+        
+        // Get video sources
+        const sources = getVideoSources();
+        if (sources.length === 0) {
+            log('No video sources found for direct embed');
+            return false;
+        }
+        
+        try {
+            const source = sources[0];
+            
+            // Create a direct request to the embed URL
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position:fixed;top:10%;left:10%;width:80%;height:80%;z-index:9999;background:#000;border:none;box-shadow:0 0 30px rgba(0,0,0,0.5);';
+            
+            // Create a random query parameter to bypass cache
+            const cacheBuster = Math.random().toString(36).substring(2, 15);
+            iframe.src = source.src + (source.src.includes('?') ? '&' : '?') + '_cb=' + cacheBuster + '&mobile=true&platform=android';
+            
+            // Add to page
+            document.body.appendChild(iframe);
+            log('Added direct embed iframe');
+    
