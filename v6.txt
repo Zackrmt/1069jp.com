@@ -1,0 +1,90 @@
+// Ultra-minimal fix for 1069jp.com on 1dmp browser
+(function() {
+    // Configuration
+    const checkFrequencyMs = 50;  // Check very frequently
+    const maxTries = 200;         // Keep trying for a while
+    
+    // Track attempts
+    let attempts = 0;
+    let found = false;
+    
+    // Function to fix video
+    function fixVideo() {
+        attempts++;
+        
+        try {
+            // 1. Find error messages
+            let errorFound = false;
+            const allElements = document.querySelectorAll('*');
+            
+            for (let i = 0; i < allElements.length; i++) {
+                const el = allElements[i];
+                if (el.textContent && el.textContent.includes("We're sorry")) {
+                    // Found error, remove it
+                    el.style.display = 'none';
+                    errorFound = true;
+                    found = true;
+                    
+                    // Look for parent container
+                    let parent = el.parentElement;
+                    for (let j = 0; j < 3; j++) {
+                        if (parent) {
+                            // Try to find an iframe in this container
+                            const iframe = parent.querySelector('iframe[data-src]');
+                            if (iframe) {
+                                // Fix the iframe
+                                const dataSrc = iframe.getAttribute('data-src');
+                                if (dataSrc) {
+                                    iframe.src = dataSrc;
+                                    iframe.style.display = 'block';
+                                    console.log('Fixed video iframe');
+                                }
+                                break;
+                            }
+                            parent = parent.parentElement;
+                        }
+                    }
+                }
+            }
+            
+            // 2. Check all iframes regardless
+            const iframes = document.querySelectorAll('iframe[data-src]');
+            for (let i = 0; i < iframes.length; i++) {
+                const iframe = iframes[i];
+                const currentSrc = iframe.getAttribute('src') || '';
+                const dataSrc = iframe.getAttribute('data-src');
+                
+                if (dataSrc && (currentSrc.startsWith('cid:') || currentSrc === 'about:blank' || currentSrc === '')) {
+                    iframe.src = dataSrc;
+                    iframe.style.display = 'block';
+                    found = true;
+                    console.log('Fixed iframe with data-src');
+                }
+            }
+            
+            // 3. Only stop if we've found something and reached max tries
+            if (attempts >= maxTries && found) {
+                console.log('Stopping automatic checks after successful fix');
+                clearInterval(intervalId);
+                
+                // Add a button for manual fixing
+                const btn = document.createElement('button');
+                btn.textContent = 'Fix Video';
+                btn.style.cssText = 'position:fixed;z-index:99999;top:10px;right:10px;background:red;color:white;padding:5px 10px;border:none;cursor:pointer;';
+                btn.onclick = fixVideo;
+                document.body.appendChild(btn);
+            }
+        } catch (e) {
+            console.error('Error fixing video:', e);
+        }
+    }
+    
+    // Run immediately
+    fixVideo();
+    
+    // Then set up interval
+    const intervalId = setInterval(fixVideo, checkFrequencyMs);
+    
+    // Return a message for debugging
+    return 'Video fix active, checking every ' + checkFrequencyMs + 'ms';
+            })();
