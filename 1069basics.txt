@@ -1,0 +1,22 @@
+! 1069jp.com Adblock Basic List for 1dmp browser
+! Block anti-adblock scripts
+||1069jp.com/adblock*
+||1069jp.com/*adblock*.js
+||1069jp.com/ads*
+||1069jp.com/*ads*.js
+||1069jp.com/blockadblock*
+||1069jp.com/*blockadblock*.js
+||1069jp.com/adsdetect*
+||1069jp.com/*adsdetect*.js
+||1069jp.com/detect*
+||1069jp.com/*detect*.js
+
+! Allow iframe video content
+@@||1069jp.com/e/
+
+! Hide ad containers
+1069jp.com##.ad-container
+1069jp.com##div[class*="ad-"]
+1069jp.com##div[id*="ad-"]
+1069jp.com##div[class*="banner"]
+1069jp.com##div[id*="banner"]
