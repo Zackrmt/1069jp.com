@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         1069jp AdBlock Bypass
-// @version      1.0
-// @description  Bypass adblock detection on 1069jp.com
+// @name         1069jp AdBlock Bypass - Enhanced
+// @version      2.0
+// @description  Advanced bypass for adblock detection on 1069jp.com
 // @match        *://*.1069jp.com/*
 // @grant        none
 // ==/UserScript==
@@ -11,9 +11,11 @@
     
     // Configuration
     const config = {
-        debug: true,  // Set to false to disable console logs
-        checkInterval: 1000,  // Check for elements every 1 second
-        maxAttempts: 30       // Maximum number of attempts to find elements
+        debug: true,                // Enable console logging
+        checkInterval: 500,         // Check more frequently (every 500ms)
+        errorCheckInterval: 100,    // Check for error messages very frequently
+        maxAttempts: 60,            // More attempts to ensure continuous monitoring
+        continuousMonitoring: true  // Keep checking even after max attempts
     };
     
     // Helper function for logging
@@ -23,181 +25,458 @@
         }
     }
     
-    // Function to override adblock detection functions
+    // Store original functions that might be modified by the site
+    const original = {
+        createElement: document.createElement,
+        appendChild: Element.prototype.appendChild,
+        removeChild: Element.prototype.removeChild,
+        setAttribute: Element.prototype.setAttribute,
+        getElementById: document.getElementById,
+        querySelector: document.querySelector,
+        querySelectorAll: document.querySelectorAll
+    };
+    
+    // Function to override adblock detection methods with more robust approach
     function overrideAdblockDetection() {
-        log('Overriding adblock detection methods...');
+        log('Setting up robust adblock detection bypass...');
         
         // Common detection variables and functions to override
-        window.adBlockDetected = function() { return false; };
-        window.adblock = false;
-        window.adblockDetector = function() { return false; };
-        window.blockAdBlock = {
-            check: function() { return false; },
-            emitEvent: function() { return false; }
-        };
+        const detectionProperties = [
+            'adBlockDetected', 'adblock', 'adblockDetector', 
+            'blockAdBlock', 'fuckAdBlock', 'sniffAdBlock', 
+            'hasAdBlocker', 'isAdBlocked', 'isAdBlockEnabled'
+        ];
         
-        // Override property getters that might be used for detection
-        try {
-            Object.defineProperty(window, 'canRunAds', {
-                get: function() { return true; },
-                configurable: true
-            });
-        } catch (e) {
-            log('Failed to override canRunAds: ' + e.message);
-        }
-        
-        // Handle potential detection by class names
-        const adClassNames = ['adsbox', 'ad-box', 'ad-banner', 'adsbygoogle'];
-        adClassNames.forEach(className => {
-            const el = document.createElement('div');
-            el.className = className;
-            el.style.height = '1px';
-            el.style.width = '1px';
-            el.style.position = 'absolute';
-            el.style.bottom = '-1px';
-            el.style.left = '-1px';
-            document.body.appendChild(el);
-        });
-    }
-    
-    // Function to ensure iframes are loaded properly
-    function fixIframes() {
-        log('Checking for iframes...');
-        
-        const iframes = document.querySelectorAll('iframe[data-src]');
-        iframes.forEach(iframe => {
-            if (iframe.getAttribute('src') && iframe.getAttribute('src').startsWith('cid:')) {
-                log('Fixing iframe with incorrect source');
-                const dataSrc = iframe.getAttribute('data-src');
-                if (dataSrc) {
-                    iframe.setAttribute('src', dataSrc);
-                    iframe.removeAttribute('data-lazyloaded');
-                    iframe.setAttribute('data-ll-status', 'loaded');
-                    log('Fixed iframe: ' + dataSrc);
-                }
+        // Override each potential detection property
+        detectionProperties.forEach(prop => {
+            try {
+                Object.defineProperty(window, prop, {
+                    get: function() { return false; },
+                    set: function() { },
+                    configurable: false
+                });
+            } catch (e) {
+                log(`Failed to override ${prop}: ${e.message}`);
             }
         });
+        
+        // Override canRunAds and other similar properties
+        const adProperties = ['canRunAds', 'canShowAds', 'adsAllowed', 'adsEnabled'];
+        adProperties.forEach(prop => {
+            try {
+                Object.defineProperty(window, prop, {
+                    get: function() { return true; },
+                    configurable: false
+                });
+            } catch (e) {
+                log(`Failed to override ${prop}: ${e.message}`);
+            }
+        });
+        
+        // Create fake ad elements to fool detection
+        const adClassNames = [
+            'adsbox', 'ad-box', 'ad-banner', 'adsbygoogle', 
+            'ad-placement', 'ad-placeholder', 'ad-slot'
+        ];
+        
+        adClassNames.forEach(className => {
+            try {
+                const el = original.createElement.call(document, 'div');
+                el.className = className;
+                el.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;';
+                document.body.appendChild(el);
+                log(`Created fake ad element: ${className}`);
+            } catch (e) {
+                log(`Failed to create ad element ${className}: ${e.message}`);
+            }
+        });
+        
+        // Override network detection more aggressively
+        try {
+            // Make detection scripts think we're on mobile connection
+            const networkProps = {
+                connection: {
+                    type: 'cellular',
+                    effectiveType: '4g',
+                    saveData: false,
+                    downlink: 10,
+                    rtt: 50
+                },
+                onLine: true
+            };
+            
+            for (const prop in networkProps) {
+                if (typeof navigator[prop] !== 'undefined') {
+                    Object.defineProperty(navigator, prop, {
+                        get: function() { 
+                            return typeof networkProps[prop] === 'object' 
+                                ? Object.assign({}, networkProps[prop]) 
+                                : networkProps[prop]; 
+                        },
+                        configurable: false
+                    });
+                }
+            }
+        } catch (e) {
+            log(`Failed to override navigator properties: ${e.message}`);
+        }
     }
     
-    // Function to disable any network analysis
-    function disableNetworkAnalysis() {
-        log('Disabling network analysis...');
-        
-        // Overriding navigator properties to mask network detection
+    // Function to ensure iframes are continuously fixed
+    function fixIframes() {
         try {
-            // Make the browser appear as mobile even on WiFi
-            const originalConnection = Object.getOwnPropertyDescriptor(Navigator.prototype, 'connection');
+            // Get all iframes, including those deeply nested
+            const iframes = document.querySelectorAll('iframe');
             
-            if (originalConnection) {
-                Object.defineProperty(Navigator.prototype, 'connection', {
-                    get: function() {
-                        const conn = originalConnection.get.call(this);
-                        if (conn) {
-                            // Override properties that might be used for detection
-                            Object.defineProperties(conn, {
-                                'type': {
-                                    get: function() { return 'cellular'; }
-                                },
-                                'effectiveType': {
-                                    get: function() { return '4g'; }
-                                },
-                                'saveData': {
-                                    get: function() { return false; }
-                                }
-                            });
+            iframes.forEach(iframe => {
+                // Check if iframe has a problematic src
+                const src = iframe.getAttribute('src') || '';
+                const dataSrc = iframe.getAttribute('data-src') || '';
+                
+                if (src.startsWith('cid:') || src === 'about:blank' || src === '') {
+                    if (dataSrc && dataSrc.length > 0) {
+                        log(`Fixing iframe: ${dataSrc}`);
+                        iframe.setAttribute('src', dataSrc);
+                        iframe.removeAttribute('data-lazyloaded');
+                        iframe.setAttribute('data-ll-status', 'loaded');
+                        
+                        // Force iframe to reload
+                        iframe.contentWindow.location.reload();
+                    }
+                }
+                
+                // Make iframe always visible
+                if (iframe.style.display === 'none') {
+                    iframe.style.display = 'block';
+                }
+            });
+        } catch (e) {
+            log(`Error fixing iframes: ${e.message}`);
+        }
+    }
+    
+    // Function to intercept and block error messages
+    function handleErrorMessages() {
+        try {
+            // Find elements containing error messages by text content
+            const elements = document.querySelectorAll('div, p, span');
+            
+            elements.forEach(el => {
+                const text = el.textContent || '';
+                if (text.includes("We're sorry") || 
+                    text.includes("can't find the file") || 
+                    text.includes("copyright violation")) {
+                    
+                    log(`Found error message, removing: ${text.substring(0, 30)}...`);
+                    
+                    // Hide the element
+                    el.style.display = 'none';
+                    
+                    // Try to find parent containers that might be hiding content
+                    let parent = el.parentElement;
+                    let depth = 0;
+                    
+                    // Check up to 3 parent levels
+                    while (parent && depth < 3) {
+                        if (parent.classList.contains('error-container') || 
+                            parent.classList.contains('message') ||
+                            parent.id.includes('error')) {
+                            
+                            log(`Hiding parent error container: ${parent.className || parent.id}`);
+                            parent.style.display = 'none';
                         }
-                        return conn;
+                        parent = parent.parentElement;
+                        depth++;
+                    }
+                }
+            });
+        } catch (e) {
+            log(`Error handling error messages: ${e.message}`);
+        }
+    }
+    
+    // Function to find and restore the video player
+    function restoreVideoPlayer() {
+        try {
+            // First check if player exists but is hidden
+            const videoElements = document.querySelectorAll('video, iframe[src*="1069jp"], iframe[data-src*="1069jp"]');
+            
+            if (videoElements.length > 0) {
+                log(`Found ${videoElements.length} video elements, ensuring they're visible`);
+                
+                videoElements.forEach(video => {
+                    // Make sure it's visible
+                    video.style.display = 'block';
+                    video.style.visibility = 'visible';
+                    video.style.opacity = '1';
+                    
+                    // If it's an iframe, ensure it has the correct src
+                    if (video.tagName.toLowerCase() === 'iframe') {
+                        const dataSrc = video.getAttribute('data-src');
+                        if (dataSrc && (!video.src || video.src === 'about:blank' || video.src.startsWith('cid:'))) {
+                            video.src = dataSrc;
+                        }
+                    }
+                    
+                    // Remove any classes that might be hiding it
+                    video.classList.remove('hidden', 'blocked', 'adblocked');
+                    
+                    // Make parent containers visible
+                    let parent = video.parentElement;
+                    let depth = 0;
+                    
+                    while (parent && depth < 5) {
+                        parent.style.display = 'block';
+                        parent.style.visibility = 'visible';
+                        parent.style.opacity = '1';
+                        parent = parent.parentElement;
+                        depth++;
                     }
                 });
             }
         } catch (e) {
-            log('Failed to override connection: ' + e.message);
+            log(`Error restoring video player: ${e.message}`);
         }
     }
     
-    // Function to check and fix player
-    function checkAndFixPlayer() {
-        log('Checking for player issues...');
-        
-        // Check for error messages and remove them
-        const errorMessages = document.querySelectorAll('div:contains("We\'re sorry")');
-        if (errorMessages.length > 0) {
-            log('Found error message, attempting to fix...');
+    // Function to monitor and intercept network state changes
+    function monitorNetworkState() {
+        try {
+            // Override the online/offline event handlers
+            window.addEventListener('offline', function(e) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                log('Intercepted offline event');
+                return false;
+            }, true);
             
-            errorMessages.forEach(msg => {
-                if (msg.textContent.includes("We're sorry")) {
-                    msg.style.display = 'none';
-                }
-            });
+            // Prevent any code from detecting we're online
+            window.addEventListener('online', function(e) {
+                // Let this event through as it's beneficial
+            }, true);
             
-            // Try to reload the iframe
-            const iframes = document.querySelectorAll('iframe[data-src]');
-            iframes.forEach(iframe => {
-                const dataSrc = iframe.getAttribute('data-src');
-                if (dataSrc) {
-                    iframe.setAttribute('src', dataSrc);
-                }
-            });
+            // Monitor for any connection property access
+            const originalConnection = navigator.connection;
+            if (originalConnection) {
+                // Create a proxy to intercept property accesses
+                Object.defineProperty(navigator, 'connection', {
+                    get: function() {
+                        log('Connection property accessed');
+                        return {
+                            effectiveType: '4g',
+                            rtt: 50,
+                            downlink: 10,
+                            saveData: false,
+                            type: 'cellular'
+                        };
+                    }
+                });
+            }
+        } catch (e) {
+            log(`Error monitoring network state: ${e.message}`);
         }
     }
     
-    // Main initialization function
+    // Override setTimeout and setInterval to prevent certain timing-based detection
+    function interceptTimers() {
+        try {
+            const originalSetTimeout = window.setTimeout;
+            const originalSetInterval = window.setInterval;
+            const originalClearTimeout = window.clearTimeout;
+            const originalClearInterval = window.clearInterval;
+            
+            // Keep track of our own timers
+            const ourTimers = new Set();
+            
+            // Override setTimeout to potentially block certain detection scripts
+            window.setTimeout = function(callback, delay, ...args) {
+                if (typeof callback === 'function' || typeof callback === 'string') {
+                    const callbackStr = callback.toString().toLowerCase();
+                    
+                    // Check if this looks like an adblock detection
+                    if (callbackStr.includes('adblock') || 
+                        callbackStr.includes('blocker') || 
+                        callbackStr.includes('detector') ||
+                        callbackStr.includes('remove') && callbackStr.includes('player')) {
+                        
+                        log(`Blocked suspicious setTimeout: ${callbackStr.substring(0, 50)}...`);
+                        return -1; // Return a fake timer ID
+                    }
+                }
+                
+                // Allow our timers through
+                const timerId = originalSetTimeout.apply(this, [callback, delay, ...args]);
+                return timerId;
+            };
+            
+            // Similar approach for setInterval
+            window.setInterval = function(callback, delay, ...args) {
+                if (typeof callback === 'function' || typeof callback === 'string') {
+                    const callbackStr = callback.toString().toLowerCase();
+                    
+                    // Check if this looks like an adblock detection
+                    if (callbackStr.includes('adblock') || 
+                        callbackStr.includes('blocker') || 
+                        callbackStr.includes('detector') ||
+                        callbackStr.includes('remove') && callbackStr.includes('player')) {
+                        
+                        log(`Blocked suspicious setInterval: ${callbackStr.substring(0, 50)}...`);
+                        return -1; // Return a fake timer ID
+                    }
+                }
+                
+                // Allow our intervals through
+                const timerId = originalSetInterval.apply(this, [callback, delay, ...args]);
+                return timerId;
+            };
+            
+            // Keep the original clear functions
+            window.clearTimeout = originalClearTimeout;
+            window.clearInterval = originalClearInterval;
+            
+        } catch (e) {
+            log(`Error intercepting timers: ${e.message}`);
+        }
+    }
+    
+    // Override the fetch and XMLHttpRequest to block certain requests
+    function interceptNetworkRequests() {
+        try {
+            // Override fetch API
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                const url = resource.url || resource.toString();
+                
+                // Check if this is a tracking or detection request
+                if (typeof url === 'string' && (
+                    url.includes('adblock') || 
+                    url.includes('analytics') || 
+                    url.includes('tracking') ||
+                    url.includes('detect'))) {
+                    
+                    log(`Blocked suspicious fetch request to: ${url}`);
+                    
+                    // Return a fake successful response
+                    return Promise.resolve(new Response(JSON.stringify({
+                        success: true,
+                        adblockDetected: false,
+                        isUsingAdblock: false
+                    }), {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    }));
+                }
+                
+                // Allow other requests through
+                return originalFetch.apply(this, arguments);
+            };
+            
+            // Override XMLHttpRequest
+            const originalOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                if (typeof url === 'string' && (
+                    url.includes('adblock') || 
+                    url.includes('analytics') || 
+                    url.includes('tracking') ||
+                    url.includes('detect'))) {
+                    
+                    log(`Blocked suspicious XMLHttpRequest to: ${url}`);
+                    
+                    // Modify the URL to a non-existent one
+                    url = 'https://localhost/blocked-request';
+                }
+                
+                return originalOpen.call(this, method, url, ...rest);
+            };
+            
+        } catch (e) {
+            log(`Error intercepting network requests: ${e.message}`);
+        }
+    }
+    
+    // Main function to initialize all protections
     function initialize() {
-        log('Initializing adblock bypass...');
+        log('Initializing enhanced adblock bypass...');
         
-        // Apply all bypasses
+        // Apply initial protections
         overrideAdblockDetection();
-        disableNetworkAnalysis();
+        monitorNetworkState();
+        interceptTimers();
+        interceptNetworkRequests();
         
-        // Set up observers for dynamic content
+        // Immediate fixes
+        fixIframes();
+        handleErrorMessages();
+        restoreVideoPlayer();
+        
+        // Set up continuous monitoring
         let attempts = 0;
-        const checkElements = setInterval(function() {
+        
+        // Check for errors very frequently (every 100ms)
+        const errorChecker = setInterval(function() {
+            handleErrorMessages();
+            restoreVideoPlayer();
+        }, config.errorCheckInterval);
+        
+        // Check iframe and other fixes less frequently
+        const mainChecker = setInterval(function() {
             attempts++;
             fixIframes();
-            checkAndFixPlayer();
             
-            if (attempts >= config.maxAttempts) {
+            if (attempts >= config.maxAttempts && !config.continuousMonitoring) {
                 log(`Reached maximum attempts (${config.maxAttempts}), stopping automatic checks`);
-                clearInterval(checkElements);
+                clearInterval(mainChecker);
+                // Keep the error checker running
             }
         }, config.checkInterval);
         
-        // Observe DOM changes to fix dynamically added content
+        // Set up a mutation observer to react to DOM changes
         const observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(mutation) {
-                if (mutation.addedNodes.length > 0) {
+                if (mutation.addedNodes.length > 0 || mutation.type === 'attributes') {
+                    // Run all our fixes when DOM changes
                     fixIframes();
-                    checkAndFixPlayer();
+                    handleErrorMessages();
+                    restoreVideoPlayer();
                 }
             });
         });
         
+        // Start observing the document with the configured parameters
         observer.observe(document.body, { 
             childList: true, 
-            subtree: true 
+            subtree: true,
+            attributes: true,
+            characterData: true
         });
         
-        log('Initialization complete');
-    }
-    
-    // Helper for text content checking
-    function addTextContentSearch() {
-        // Add a contains method to the NodeList prototype for text searching
-        NodeList.prototype.forEach = Array.prototype.forEach;
+        // Run a final check after everything has loaded
+        window.addEventListener('load', function() {
+            log('Page fully loaded, applying final fixes');
+            fixIframes();
+            handleErrorMessages();
+            restoreVideoPlayer();
+            
+            // Set up a backup checker that runs for a longer time
+            setTimeout(function() {
+                log('Running delayed final check');
+                fixIframes();
+                handleErrorMessages();
+                restoreVideoPlayer();
+            }, 3000);
+        });
         
-        // Add a contains method that checks if text is in the element
-        HTMLElement.prototype.textContains = function(text) {
-            return this.textContent.indexOf(text) > -1;
-        };
+        log('Enhanced initialization complete');
     }
     
-    // Add text search functionality
-    addTextContentSearch();
-    
-    // Run when DOM is ready
+    // Run our script as early as possible
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initialize);
     } else {
         initialize();
     }
+    
+    // Also run immediately to catch any early detections
+    initialize();
+    
 })();
