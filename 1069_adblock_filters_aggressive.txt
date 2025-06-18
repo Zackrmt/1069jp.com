@@ -1,0 +1,54 @@
+! Title: 1069jp AdBlock Bypass Filters (Aggressive)
+! Description: Aggressive filters to bypass anti-adblock detection on 1069jp.com
+! Version: 1.0
+! Last updated: 2025-06-18
+! Author: Zackrmt
+! Homepage: https://github.com/Zackrmt/1069jp-adblocker
+! License: MIT
+
+! Block all script detection mechanisms
+||1069jp.com/*.js$script
+
+! But allow essential scripts
+@@||1069jp.com/*/player.js$script
+@@||1069jp.com/*/video.js$script
+@@||1069jp.com/*/jquery*.js$script
+@@||1069jp.com/*/main.js$script
+
+! Force allow iframe content
+@@||1069jp.com/e/$all,important
+
+! Block all ad network connections
+||ads*.1069jp.com^$all
+||analytics*.1069jp.com^$all
+||tracker*.1069jp.com^$all
+||pixel*.1069jp.com^$all
+||banner*.1069jp.com^$all
+
+! Remove all ad containers
+1069jp.com##div[class*="ad"]
+1069jp.com##div[id*="ad"]
+1069jp.com##div[class*="banner"]
+1069jp.com##div[id*="banner"]
+1069jp.com##div[class*="sponsor"]
+1069jp.com##div[class*="promo"]
+1069jp.com##.advertising
+1069jp.com##.advert
+1069jp.com##.adsbygoogle
+
+! Inject script to fix iframe issues and bypass detection
+1069jp.com##+js(add-attr, src, data-src, iframe[data-src])
+1069jp.com##+js(set-constant, navigator.userAgent, "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36")
+1069jp.com##+js(set-constant, navigator.platform, "Linux armv8l")
+1069jp.com##+js(set-constant, navigator.maxTouchPoints, 5)
+1069jp.com##+js(aopw, adBlockDetected)
+1069jp.com##+js(aopw, adBlocker)
+1069jp.com##+js(aopr, canRunAds)
+1069jp.com##+js(acis, document.createElement, /ad|sponsor|banner/)
+1069jp.com##+js(aopw, AdBlock)
+
+! Miscellaneous bypasses
+1069jp.com##+js(nostif, /ad|banner|block|detect/)
+1069jp.com##+js(nowebrtc)
+1069jp.com##+js(nano-setTimeout-booster)
+1069jp.com##+js(no-xhr-if, /ads|analytics|tracking/)
