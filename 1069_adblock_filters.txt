@@ -1,0 +1,43 @@
+! Title: 1069jp AdBlock Bypass Filters
+! Description: Custom filters to bypass anti-adblock detection on 1069jp.com
+! Version: 1.0
+! Last updated: 2025-06-18
+! Author: Zackrmt
+! Homepage: https://github.com/Zackrmt/1069jp-adblocker
+! License: MIT
+
+! Block anti-adblock scripts
+||1069jp.com/*/adblock*.js$script,important
+||1069jp.com/*/blockadblock*.js$script,important
+||1069jp.com/*/ads*.js$script,important
+||1069jp.com/*/detect*.js$script,important
+||1069jp.com/*/adframe*.js$script,important
+||1069jp.com/*/adsdetect*.js$script,important
+
+! Allow iframe content to load
+@@||1069jp.com/e/$subdocument,important
+
+! Hide ad containers but allow iframe content
+1069jp.com##.ad-container
+1069jp.com##div[class*="ad-"]
+1069jp.com##div[id*="ad-"]
+1069jp.com##div[class*="banner"]
+1069jp.com##div[id*="banner"]
+
+! Fix for the iframe loading issue
+1069jp.com##+js(remove-attr, data-lazyloaded, iframe[data-src])
+1069jp.com##+js(set-attr, src, data-src, iframe[data-src])
+
+! Bypass anti-adblock detection
+1069jp.com##+js(set-constant, navigator.userAgent, "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36")
+1069jp.com##+js(abort-on-property-read, adBlockDetected)
+1069jp.com##+js(abort-on-property-read, canRunAds)
+1069jp.com##+js(abort-on-property-read, blockAdBlock)
+1069jp.com##+js(no-fetch-if, /ads/)
+1069jp.com##+js(abort-current-inline-script, document.createElement, adsbygoogle)
+
+! Generic anti-adblock bypasses
+1069jp.com##+js(nostif, ad)
+1069jp.com##+js(nowebrtc)
+1069jp.com##+js(set-constant, adBlockDetected, false)
+1069jp.com##+js(set-constant, canRunAds, true)
