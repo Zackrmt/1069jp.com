@@ -1,0 +1,672 @@
+// ==UserScript==
+// @name         1069jp Direct Player
+// @version      5.0
+// @description  Extracts video source and creates a direct player
+// @match        *://*.1069jp.com/*
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Configuration
+    const config = {
+        debug: true,                   // Enable logging
+        extractionAttemptDelay: 300,   // Try to extract source very quickly (300ms)
+        maxExtractionAttempts: 50,     // Try many times to extract
+        immediateOverlay: false,       // Whether to show overlay immediately or wait for extraction
+        aggressiveExtraction: true     // Use more aggressive extraction methods
+    };
+    
+    // Global state
+    const state = {
+        extractionAttempts: 0,
+        extractedSources: [],
+        playerCreated: false,
+        extractionTimer: null,
+        playerReady: false
+    };
+    
+    // Logging function
+    function log(message) {
+        if (config.debug) {
+            console.log(`[DirectPlayer] ${message}`);
+        }
+    }
+    
+    // Function to extract video sources from all possible locations
+    function extractVideoSources() {
+        log(`Extraction attempt ${state.extractionAttempts + 1}/${config.maxExtractionAttempts}`);
+        state.extractionAttempts++;
+        
+        // Collection of found sources
+        const newSources = [];
+        
+        try {
+            // Method 1: Extract from iframes
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                try {
+                    // Try to access iframe content (may fail due to same-origin policy)
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    
+                    // Look for video elements
+                    const videos = iframeDoc.querySelectorAll('video, source');
+                    videos.forEach(video => {
+                        const src = video.src || video.getAttribute('src');
+                        if (src && isValidVideoUrl(src)) {
+                            log(`Found video source in iframe: ${src}`);
+                            newSources.push({
+                                type: 'direct',
+                                url: src,
+                                quality: getQualityFromUrl(src)
+                            });
+                        }
+                    });
+                    
+                    // Look for HTML5 video sources
+                    const sources = iframeDoc.querySelectorAll('source');
+                    sources.forEach(source => {
+                        const src = source.src || source.getAttribute('src');
+                        if (src && isValidVideoUrl(src)) {
+                            log(`Found source element in iframe: ${src}`);
+                            newSources.push({
+                                type: 'direct',
+                                url: src,
+                                quality: getQualityFromUrl(src)
+                            });
+                        }
+                    });
+                } catch (e) {
+                    // Expected error due to same-origin policy
+                    // We'll try other methods
+                }
+                
+                // Try to extract from iframe src
+                const iframeSrc = iframe.getAttribute('src') || iframe.getAttribute('data-src') || '';
+                if (iframeSrc && iframeSrc.includes('1069jp.com')) {
+                    log(`Found iframe source: ${iframeSrc}`);
+                    newSources.push({
+                        type: 'iframe',
+                        url: iframeSrc,
+                        quality: 'unknown'
+                    });
+                }
+            });
+            
+            // Method 2: Check for JW Player or other popular players
+            if (typeof window.jwplayer !== 'undefined') {
+                log('JW Player detected, attempting to extract sources');
+                const players = window.jwplayer();
+                
+                if (Array.isArray(players)) {
+                    players.forEach(player => {
+                        try {
+                            const playlist = player.getPlaylist();
+                            if (playlist && playlist.length > 0) {
+                                playlist.forEach(item => {
+                                    if (item.sources && item.sources.length > 0) {
+                                        item.sources.forEach(source => {
+                                            if (source.file && isValidVideoUrl(source.file)) {
+                                                log(`Found JW Player source: ${source.file}`);
+                                                newSources.push({
+                                                    type: 'direct',
+                                                    url: source.file,
+                                                    quality: source.label || getQualityFromUrl(source.file)
+                                                });
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        } catch (e) {
+                            log(`Error extracting from JW Player: ${e.message}`);
+                        }
+                    });
+                }
+            }
+            
+            // Method 3: Check in video tags
+            const videos = document.querySelectorAll('video');
+            videos.forEach(video => {
+                const src = video.src || video.getAttribute('src');
+                if (src && isValidVideoUrl(src)) {
+                    log(`Found video element source: ${src}`);
+                    newSources.push({
+                        type: 'direct',
+                        url: src,
+                        quality: getQualityFromUrl(src)
+                    });
+                }
+                
+                // Check sources within video tag
+                const sources = video.querySelectorAll('source');
+                sources.forEach(source => {
+                    const src = source.src || source.getAttribute('src');
+                    if (src && isValidVideoUrl(src)) {
+                        log(`Found source element: ${src}`);
+                        newSources.push({
+                            type: 'direct',
+                            url: src,
+                            quality: getQualityFromUrl(src)
+                        });
+                    }
+                });
+            });
+            
+            // Method 4: Look for m3u8 playlists in all scripts
+            const scripts = document.querySelectorAll('script');
+            scripts.forEach(script => {
+                const content = script.textContent || '';
+                
+                // Look for m3u8 URLs
+                const m3u8Matches = content.match(/['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/g);
+                if (m3u8Matches) {
+                    m3u8Matches.forEach(match => {
+                        const url = match.replace(/['"]/g, '');
+                        if (isValidVideoUrl(url)) {
+                            log(`Found m3u8 in script: ${url}`);
+                            newSources.push({
+                                type: 'hls',
+                                url: url,
+                                quality: 'adaptive'
+                            });
+                        }
+                    });
+                }
+                
+                // Look for mp4 URLs
+                const mp4Matches = content.match(/['"](https?:\/\/[^'"]+\.mp4[^'"]*)['"]/g);
+                if (mp4Matches) {
+                    mp4Matches.forEach(match => {
+                        const url = match.replace(/['"]/g, '');
+                        if (isValidVideoUrl(url)) {
+                            log(`Found mp4 in script: ${url}`);
+                            newSources.push({
+                                type: 'direct',
+                                url: url,
+                                quality: getQualityFromUrl(url)
+                            });
+                        }
+                    });
+                }
+            });
+            
+            // Method 5: Aggressive - extract from network requests if supported
+            if (config.aggressiveExtraction && window.performance && window.performance.getEntries) {
+                log('Checking network requests for video sources');
+                
+                const entries = window.performance.getEntries();
+                entries.forEach(entry => {
+                    const url = entry.name || '';
+                    if (isValidVideoUrl(url)) {
+                        log(`Found video in network requests: ${url}`);
+                        newSources.push({
+                            type: determineSourceType(url),
+                            url: url,
+                            quality: getQualityFromUrl(url)
+                        });
+                    }
+                });
+            }
+            
+            // Add any new sources to our collection
+            if (newSources.length > 0) {
+                log(`Found ${newSources.length} new sources`);
+                
+                // Add only unique sources
+                newSources.forEach(source => {
+                    const exists = state.extractedSources.some(s => s.url === source.url);
+                    if (!exists) {
+                        state.extractedSources.push(source);
+                    }
+                });
+                
+                // Sort sources by quality
+                state.extractedSources.sort((a, b) => {
+                    // Prefer direct sources first
+                    if (a.type === 'direct' && b.type !== 'direct') return -1;
+                    if (a.type !== 'direct' && b.type === 'direct') return 1;
+                    
+                    // Then sort by quality
+                    const qualityA = parseQuality(a.quality);
+                    const qualityB = parseQuality(b.quality);
+                    return qualityB - qualityA;
+                });
+                
+                log(`Total unique sources: ${state.extractedSources.length}`);
+                
+                // If we have sources and haven't created a player yet, create one
+                if (state.extractedSources.length > 0 && !state.playerCreated) {
+                    createCustomPlayer();
+                }
+            }
+        } catch (e) {
+            log(`Error during extraction: ${e.message}`);
+        }
+        
+        // Continue extraction attempts if needed
+        if (state.extractionAttempts < config.maxExtractionAttempts && state.extractedSources.length === 0) {
+            state.extractionTimer = setTimeout(extractVideoSources, config.extractionAttemptDelay);
+        } else if (state.extractedSources.length === 0) {
+            log('Reached maximum extraction attempts without finding sources');
+            createFallbackPlayer();
+        }
+    }
+    
+    // Helper function to check if a URL is a valid video source
+    function isValidVideoUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        
+        // Check for common video extensions
+        const videoExtensions = ['.mp4', '.m3u8', '.ts', '.webm', '.mpd', '.m4v', '.mov'];
+        const videoExtension = videoExtensions.some(ext => url.includes(ext));
+        
+        // Check for common video hosting domains
+        const videoHosts = ['1069jp.com', 'player', 'video', 'stream', 'cdn', 'media'];
+        const videoHost = videoHosts.some(host => url.includes(host));
+        
+        return videoExtension || videoHost;
+    }
+    
+    // Determine the source type based on URL
+    function determineSourceType(url) {
+        if (url.includes('.m3u8')) return 'hls';
+        if (url.includes('.mpd')) return 'dash';
+        return 'direct';
+    }
+    
+    // Extract quality information from URL
+    function getQualityFromUrl(url) {
+        // Common quality patterns in URLs
+        const qualityPatterns = [
+            { pattern: /1080p/i, quality: '1080p' },
+            { pattern: /720p/i, quality: '720p' },
+            { pattern: /480p/i, quality: '480p' },
+            { pattern: /360p/i, quality: '360p' },
+            { pattern: /hd/i, quality: 'HD' },
+            { pattern: /high/i, quality: 'high' },
+            { pattern: /medium/i, quality: 'medium' },
+            { pattern: /low/i, quality: 'low' }
+        ];
+        
+        for (const {pattern, quality} of qualityPatterns) {
+            if (pattern.test(url)) return quality;
+        }
+        
+        return 'unknown';
+    }
+    
+    // Parse quality string to numeric value for sorting
+    function parseQuality(quality) {
+        if (quality.includes('1080')) return 1080;
+        if (quality.includes('720')) return 720;
+        if (quality.includes('480')) return 480;
+        if (quality.includes('360')) return 360;
+        if (quality === 'HD' || quality === 'high') return 700;
+        if (quality === 'medium') return 500;
+        if (quality === 'low') return 300;
+        return 0;
+    }
+    
+    // Create our custom video player
+    function createCustomPlayer() {
+        if (state.playerCreated) return;
+        
+        log('Creating custom video player');
+        state.playerCreated = true;
+        
+        // Create player container
+        const playerContainer = document.createElement('div');
+        playerContainer.id = 'customVideoPlayer';
+        playerContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+        
+        // Player header
+        const playerHeader = document.createElement('div');
+        playerHeader.style.cssText = 'width:100%;max-width:800px;display:flex;justify-content:space-between;align-items:center;padding:10px;box-sizing:border-box;';
+        
+        // Title
+        const playerTitle = document.createElement('h2');
+        playerTitle.textContent = 'Direct Video Player';
+        playerTitle.style.cssText = 'color:#fff;margin:0;';
+        playerHeader.appendChild(playerTitle);
+        
+        // Close button
+        const closeButton = document.createElement('button');
+        closeButton.textContent = 'Close';
+        closeButton.style.cssText = 'background:#f00;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+        closeButton.onclick = function() {
+            playerContainer.remove();
+            state.playerCreated = false;
+        };
+        playerHeader.appendChild(closeButton);
+        
+        playerContainer.appendChild(playerHeader);
+        
+        // Video container
+        const videoWrapper = document.createElement('div');
+        videoWrapper.style.cssText = 'width:100%;max-width:800px;aspect-ratio:16/9;background:#000;position:relative;';
+        
+        // Loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.textContent = 'Loading video...';
+        loadingIndicator.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;background:rgba(0,0,0,0.7);';
+        videoWrapper.appendChild(loadingIndicator);
+        
+        // Create video element
+        const video = document.createElement('video');
+        video.controls = true;
+        video.autoplay = true;
+        video.style.cssText = 'width:100%;height:100%;';
+        videoWrapper.appendChild(video);
+        
+        playerContainer.appendChild(videoWrapper);
+        
+        // Source selection
+        const sourceSelector = document.createElement('div');
+        sourceSelector.style.cssText = 'width:100%;max-width:800px;padding:10px;box-sizing:border-box;';
+        
+        // Source select dropdown
+        const sourceLabel = document.createElement('label');
+        sourceLabel.textContent = 'Select Source: ';
+        sourceLabel.style.cssText = 'color:#fff;margin-right:10px;';
+        sourceSelector.appendChild(sourceLabel);
+        
+        const sourceSelect = document.createElement('select');
+        sourceSelect.style.cssText = 'padding:5px;width:300px;';
+        
+        // Add sources to dropdown
+        state.extractedSources.forEach((source, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = `${source.type.toUpperCase()} - ${source.quality} - Source ${index + 1}`;
+            sourceSelect.appendChild(option);
+        });
+        
+        // Handle source change
+        sourceSelect.onchange = function() {
+            const selectedIndex = parseInt(this.value);
+            const selectedSource = state.extractedSources[selectedIndex];
+            loadVideoSource(video, selectedSource, loadingIndicator);
+        };
+        
+        sourceSelector.appendChild(sourceSelect);
+        playerContainer.appendChild(sourceSelector);
+        
+        // Additional info
+        const infoText = document.createElement('p');
+        infoText.textContent = 'If the video doesn\'t play, try selecting a different source from the dropdown.';
+        infoText.style.cssText = 'color:#fff;width:100%;max-width:800px;padding:10px;box-sizing:border-box;margin-top:10px;';
+        playerContainer.appendChild(infoText);
+        
+        // Add to document
+        document.body.appendChild(playerContainer);
+        
+        // Load the first source
+        if (state.extractedSources.length > 0) {
+            loadVideoSource(video, state.extractedSources[0], loadingIndicator);
+        }
+    }
+    
+    // Create a fallback player if no sources are found
+    function createFallbackPlayer() {
+        if (state.playerCreated) return;
+        
+        log('Creating fallback player');
+        state.playerCreated = true;
+        
+        // Create player container
+        const playerContainer = document.createElement('div');
+        playerContainer.id = 'fallbackVideoPlayer';
+        playerContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+        
+        // Player header
+        const playerHeader = document.createElement('div');
+        playerHeader.style.cssText = 'width:100%;max-width:800px;display:flex;justify-content:space-between;align-items:center;padding:10px;box-sizing:border-box;';
+        
+        // Title
+        const playerTitle = document.createElement('h2');
+        playerTitle.textContent = 'Fallback Player';
+        playerTitle.style.cssText = 'color:#fff;margin:0;';
+        playerHeader.appendChild(playerTitle);
+        
+        // Close button
+        const closeButton = document.createElement('button');
+        closeButton.textContent = 'Close';
+        closeButton.style.cssText = 'background:#f00;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+        closeButton.onclick = function() {
+            playerContainer.remove();
+            state.playerCreated = false;
+        };
+        playerHeader.appendChild(closeButton);
+        
+        playerContainer.appendChild(playerHeader);
+        
+        // Content area
+        const contentArea = document.createElement('div');
+        contentArea.style.cssText = 'width:100%;max-width:800px;background:#000;padding:20px;box-sizing:border-box;color:#fff;';
+        
+        contentArea.innerHTML = `
+            <h3>No video sources found automatically</h3>
+            <p>Try one of these options:</p>
+            <ol>
+                <li>Enter an iframe src URL manually:</li>
+            </ol>
+        `;
+        
+        // Manual URL input
+        const urlInput = document.createElement('input');
+        urlInput.type = 'text';
+        urlInput.placeholder = 'Enter iframe src URL (e.g., https://1069jp.com/e/...)';
+        urlInput.style.cssText = 'width:100%;padding:8px;margin:10px 0;';
+        contentArea.appendChild(urlInput);
+        
+        const loadButton = document.createElement('button');
+        loadButton.textContent = 'Load URL';
+        loadButton.style.cssText = 'background:#00a;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;margin-right:10px;';
+        loadButton.onclick = function() {
+            const url = urlInput.value.trim();
+            if (url) {
+                // Create iframe with the URL
+                const iframeContainer = document.createElement('div');
+                iframeContainer.style.cssText = 'width:100%;aspect-ratio:16/9;margin-top:20px;';
+                
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.style.cssText = 'width:100%;height:100%;border:none;';
+                iframe.setAttribute('allowfullscreen', 'true');
+                
+                iframeContainer.appendChild(iframe);
+                contentArea.appendChild(iframeContainer);
+                
+                // Hide the input section
+                urlInput.style.display = 'none';
+                loadButton.style.display = 'none';
+                extractButton.style.display = 'none';
+            }
+        };
+        contentArea.appendChild(loadButton);
+        
+        // Extract button
+        const extractButton = document.createElement('button');
+        extractButton.textContent = 'Try Extraction Again';
+        extractButton.style.cssText = 'background:#090;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+        extractButton.onclick = function() {
+            // Reset extraction state
+            state.extractionAttempts = 0;
+            
+            // Show loading indicator
+            const loadingText = document.createElement('p');
+            loadingText.textContent = 'Extracting sources again...';
+            loadingText.style.color = '#fff';
+            contentArea.appendChild(loadingText);
+            
+            // Try extraction again
+            clearTimeout(state.extractionTimer);
+            extractVideoSources();
+            
+            // Check after a few seconds
+            setTimeout(() => {
+                if (state.extractedSources.length > 0) {
+                    playerContainer.remove();
+                    state.playerCreated = false;
+                    createCustomPlayer();
+                } else {
+                    loadingText.textContent = 'Still no sources found. Try entering a URL manually.';
+                }
+            }, 3000);
+        };
+        contentArea.appendChild(extractButton);
+        
+        playerContainer.appendChild(contentArea);
+        
+        // Additional help
+        const helpText = document.createElement('p');
+        helpText.innerHTML = `
+            <b>Tip:</b> Look in the page source for iframe URLs with "1069jp.com/e/" or check the Network tab in developer tools for video files.
+        `;
+        helpText.style.cssText = 'color:#fff;width:100%;max-width:800px;padding:10px;box-sizing:border-box;margin-top:10px;';
+        playerContainer.appendChild(helpText);
+        
+        // Add to document
+        document.body.appendChild(playerContainer);
+    }
+    
+    // Load a video source into the player
+    function loadVideoSource(videoElement, source, loadingIndicator) {
+        log(`Loading source: ${source.type} - ${source.url}`);
+        
+        // Show loading indicator
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'flex';
+        }
+        
+        // Clear existing sources
+        while (videoElement.firstChild) {
+            videoElement.removeChild(videoElement.firstChild);
+        }
+        
+        // Handle different source types
+        if (source.type === 'iframe') {
+            // For iframe sources, replace the video with an iframe
+            const iframeContainer = videoElement.parentElement;
+            
+            // Remove the video element
+            videoElement.remove();
+            
+            // Create iframe
+            const iframe = document.createElement('iframe');
+            iframe.src = source.url;
+            iframe.style.cssText = 'width:100%;height:100%;border:none;';
+            iframe.setAttribute('allowfullscreen', 'true');
+            
+            // Remove loading indicator if it exists
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+            }
+            
+            // Add iframe to container
+            iframeContainer.appendChild(iframe);
+            
+        } else if (source.type === 'hls') {
+            // For HLS (m3u8) sources
+            if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support
+                videoElement.src = source.url;
+            } else if (typeof Hls !== 'undefined') {
+                // HLS.js is available
+                const hls = new Hls();
+                hls.loadSource(source.url);
+                hls.attachMedia(videoElement);
+            } else {
+                // Try to add a source element anyway
+                const sourceElement = document.createElement('source');
+                sourceElement.src = source.url;
+                sourceElement.type = 'application/x-mpegURL';
+                videoElement.appendChild(sourceElement);
+            }
+            
+        } else if (source.type === 'dash') {
+            // For DASH (mpd) sources
+            if (typeof dashjs !== 'undefined') {
+                // dash.js is available
+                const dashPlayer = dashjs.MediaPlayer().create();
+                dashPlayer.initialize(videoElement, source.url, true);
+            } else {
+                // Try to add a source element anyway
+                const sourceElement = document.createElement('source');
+                sourceElement.src = source.url;
+                sourceElement.type = 'application/dash+xml';
+                videoElement.appendChild(sourceElement);
+            }
+            
+        } else {
+            // Direct sources (mp4, etc)
+            videoElement.src = source.url;
+        }
+        
+        // Hide loading indicator when video can play
+        if (loadingIndicator && source.type !== 'iframe') {
+            videoElement.oncanplay = function() {
+                loadingIndicator.style.display = 'none';
+            };
+            
+            videoElement.onerror = function() {
+                loadingIndicator.textContent = 'Error loading video. Try another source.';
+            };
+        }
+        
+        // Try to play the video
+        if (source.type !== 'iframe') {
+            videoElement.play().catch(e => {
+                log(`Error playing video: ${e.message}`);
+            });
+        }
+    }
+    
+    // Initialize extraction
+    function initialize() {
+        log('Initializing Direct Player...');
+        
+        // Add a button to manually trigger the player
+        const triggerButton = document.createElement('button');
+        triggerButton.textContent = 'Direct Player';
+        triggerButton.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;background:#00a;color:#fff;border:none;padding:8px 15px;cursor:pointer;font-weight:bold;border-radius:4px;';
+        triggerButton.onclick = function() {
+            if (state.extractedSources.length > 0) {
+                createCustomPlayer();
+            } else {
+                createFallbackPlayer();
+            }
+        };
+        document.body.appendChild(triggerButton);
+        
+        // Start extraction
+        extractVideoSources();
+        
+        // Create player immediately if configured
+        if (config.immediateOverlay) {
+            createFallbackPlayer();
+        }
+        
+        // Add keyboard shortcut (Shift+D)
+        document.addEventListener('keydown', function(e) {
+            if (e.shiftKey && e.key === 'D') {
+                if (state.extractedSources.length > 0) {
+                    createCustomPlayer();
+                } else {
+                    createFallbackPlayer();
+                }
+            }
+        });
+    }
+    
+    // Run initialization
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
+    }
+    
+    // Return success message
+    return 'Direct Player activated. Extracting video sources...';
+})();
